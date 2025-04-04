@@ -85,11 +85,12 @@ class NewspaperScraper:
         except Exception as e:
             st.error(f"Error saving metadata file: {e}")
 
-    def get_article_metadata(self, soup, url, article_id):
-        """Extract metadata from article page"""
+    def get_article_metadata(self, soup, url, article_id, page):
+        """Extract metadata from article page with page information"""
         metadata = {
             'url': url,
             'article_id': article_id,
+            'page_number': page,
             'title': '',
             'date_scraped': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -108,7 +109,7 @@ class NewspaperScraper:
         return metadata
 
     def download_image(self, url, folder_path, page, article_id):
-        """Download image from article page"""
+        """Download image from article page with page-specific organization"""
         try:
             if url in self.successful_urls['successful_urls']:
                 return False, "Already downloaded"
@@ -126,7 +127,10 @@ class NewspaperScraper:
                 return False, "No image found"
 
             img_url = img_tag['src']
-            os.makedirs(folder_path, exist_ok=True)
+
+            # Create page-specific folder
+            page_folder = os.path.join(folder_path, f'page_{page}')
+            os.makedirs(page_folder, exist_ok=True)
 
             img_response = requests.get(img_url, headers=self.headers, timeout=10)
             if img_response.status_code == 200:
@@ -135,13 +139,13 @@ class NewspaperScraper:
                     ext = '.jpeg'
 
                 filename = f'page{page}_article_{article_id}{ext}'
-                filepath = os.path.join(folder_path, filename)
+                filepath = os.path.join(page_folder, filename)
 
                 with open(filepath, 'wb') as f:
                     f.write(img_response.content)
 
-                metadata = self.get_article_metadata(soup, url, article_id)
-                self.metadata[str(article_id)] = metadata
+                metadata = self.get_article_metadata(soup, url, article_id, page)
+                self.metadata[f"{page}_{article_id}"] = metadata
                 self.save_metadata()
 
                 self.consecutive_failures = 0
@@ -167,12 +171,7 @@ class NewspaperScraper:
 
     def jump_search_for_page(self, page, start_range=348000, end_range=348999):
         """
-        Modified jump search with new logic:
-        1. Start from start_range with default jump size of 99
-        2. Search until article found or end_range reached
-        3. If end_range reached without finding article, halve jump size and restart
-        4. When article found, do nearest neighbor search until 10 consecutive misses
-        5. Move to next page after completing search
+        Jump search implementation with page-specific URL handling
         """
         status_text = st.empty()
         progress_bar = st.progress(0)
@@ -180,8 +179,8 @@ class NewspaperScraper:
 
         found_articles = []
         searched_ids = set()
-        default_jump_size = 99  # Default jump size
-        jump_size = default_jump_size  # Reset jump size for each page
+        default_jump_size = 99
+        jump_size = default_jump_size
         current_id = start_range
         consecutive_failures = 0
 
@@ -193,84 +192,85 @@ class NewspaperScraper:
             Current ID: {current_id}
             Consecutive failures: {consecutive_failures}
             """)
-
-            # Update progress based on range covered
             progress = len(searched_ids) / (end_range - start_range)
             progress_bar.progress(min(progress, 1.0))
 
         while jump_size >= 1:
-            status_text.text(f"Searching with jump size: {jump_size}")
+            status_text.text(f"Searching page {page} with jump size: {jump_size}")
             found_article_in_cycle = False
             current_id = start_range
 
-            # Main search loop
             while current_id <= end_range:
                 if current_id not in searched_ids:
+                    # Updated URL format with page number
                     url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{current_id}'
-                    status_text.text(f"Trying ID: {current_id}")
+                    status_text.text(f"Trying Page {page}, ID: {current_id}")
 
-                    success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, current_id)
+                    success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str, f'page_{page}'), page, current_id)
                     searched_ids.add(current_id)
                     update_stats()
 
                     if success:
                         found_article_in_cycle = True
                         found_articles.append({
+                            'page': page,
                             'article_id': current_id,
                             'url': url,
                             'filepath': result
                         })
 
-                        # Nearest neighbor search
+                        # Nearest neighbor search within the same page
                         consecutive_failures = 0
                         current_pos = current_id
                         offset = 1
 
                         while consecutive_failures < 10:
-                            # Try one up and one down
                             for neighbor_id in [current_pos + offset, current_pos - offset]:
                                 if start_range <= neighbor_id <= end_range and neighbor_id not in searched_ids:
-                                    url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{neighbor_id}'
-                                    status_text.text(f"Checking neighbor: {neighbor_id}")
+                                    neighbor_url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{neighbor_id}'
+                                    status_text.text(f"Checking page {page}, neighbor: {neighbor_id}")
 
-                                    success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, neighbor_id)
+                                    success, result = self.download_image(
+                                        neighbor_url,
+                                        os.path.join(self.base_folder, self.date_str, f'page_{page}'),
+                                        page,
+                                        neighbor_id
+                                    )
                                     searched_ids.add(neighbor_id)
                                     update_stats()
 
                                     if success:
                                         consecutive_failures = 0
                                         found_articles.append({
+                                            'page': page,
                                             'article_id': neighbor_id,
-                                            'url': url,
+                                            'url': neighbor_url,
                                             'filepath': result
                                         })
                                     else:
                                         consecutive_failures += 1
 
                             offset += 1
-                            time.sleep(0.5)  # Prevent too rapid requests
+                            time.sleep(0.5)
 
-                        # After nearest neighbor search, continue with jump search
                         current_id += jump_size
                     else:
                         current_id += jump_size
-
                 else:
                     current_id += jump_size
 
-                time.sleep(0.5)  # Prevent too rapid requests
+                time.sleep(0.5)
 
-            # If no article found in this cycle and we reached end_range
             if not found_article_in_cycle:
-                jump_size = jump_size // 2  # Halve the jump size
-                status_text.text(f"No articles found. Reducing jump size to {jump_size}")
+                jump_size = jump_size // 2
+                status_text.text(f"No articles found on page {page}. Reducing jump size to {jump_size}")
             else:
-                break  # Exit if we found and processed articles
+                break
 
-        # Sort found articles by ID
+        # Sort found articles by ID within the page
         found_articles.sort(key=lambda x: x['article_id'])
 
-        # Display final statistics for this page
+        # Display page-specific summary
         if found_articles:
             st.write(f"""
             ### Page {page} Summary
