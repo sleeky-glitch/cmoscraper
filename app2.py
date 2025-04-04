@@ -180,7 +180,8 @@ class NewspaperScraper:
 
         found_articles = []
         searched_ids = set()
-        jump_size = 99  # Default jump size
+        default_jump_size = 99  # Default jump size
+        jump_size = default_jump_size  # Reset jump size for each page
         current_id = start_range
         consecutive_failures = 0
 
