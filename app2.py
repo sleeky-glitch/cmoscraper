@@ -205,6 +205,7 @@ class NewspaperScraper:
                     # Updated URL format with page number
                     url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{current_id}'
                     status_text.text(f"Trying Page {page}, ID: {current_id}")
+                    st.write(f"Searching: [Page {page}, ID {current_id}]({url})")  # Display page link
 
                     success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str, f'page_{page}'), page, current_id)
                     searched_ids.add(current_id)
@@ -229,6 +230,7 @@ class NewspaperScraper:
                                 if start_range <= neighbor_id <= end_range and neighbor_id not in searched_ids:
                                     neighbor_url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{neighbor_id}'
                                     status_text.text(f"Checking page {page}, neighbor: {neighbor_id}")
+                                    st.write(f"Searching: [Page {page}, Neighbor ID {neighbor_id}]({neighbor_url})")  # Display neighbor link
 
                                     success, result = self.download_image(
                                         neighbor_url,
