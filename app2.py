@@ -167,8 +167,7 @@ class NewspaperScraper:
 
     def jump_search_for_page(self, page, start_range=348000, end_range=348999):
         """
-        Perform a jump search to find valid articles, starting with large gaps and narrowing down.
-        Once an article is found, search nearby IDs.
+        Modified jump search with early exit after consecutive failures
         """
         status_text = st.empty()
         progress_bar = st.progress(0)
@@ -186,6 +185,8 @@ class NewspaperScraper:
         current_id = start_range
         searched_ids = set()
         found_ids = set()
+        consecutive_failures = 0
+        has_found_first_article = False
 
         while jump_size >= 1:
             search_stats.text(f"""
@@ -193,7 +194,13 @@ class NewspaperScraper:
             IDs searched: {len(searched_ids)}
             Articles found: {len(found_articles)}
             Current ID: {current_id}
+            Consecutive failures: {consecutive_failures}
             """)
+
+            # Check if we should exit due to consecutive failures
+            if has_found_first_article and consecutive_failures >= 10:
+                st.warning(f"Exiting page {page} after {consecutive_failures} consecutive failures")
+                break
 
             # Try current ID
             if current_id not in searched_ids and start_range <= current_id <= end_range:
@@ -204,6 +211,8 @@ class NewspaperScraper:
                 searched_ids.add(current_id)
 
                 if success:
+                    has_found_first_article = True
+                    consecutive_failures = 0  # Reset counter on success
                     found_articles.append({
                         'article_id': current_id,
                         'url': url,
@@ -222,15 +231,20 @@ class NewspaperScraper:
                             searched_ids.add(nearby_id)
 
                             if success:
+                                consecutive_failures = 0  # Reset counter on success
                                 found_articles.append({
                                     'article_id': nearby_id,
                                     'url': url,
                                     'filepath': result
                                 })
                                 found_ids.add(nearby_id)
+                            else:
+                                consecutive_failures += 1
 
                     # Reduce jump size after finding an article
                     jump_size = max(jump_size // 2, 1)
+                else:
+                    consecutive_failures += 1
 
                 # Update progress
                 progress = len(searched_ids) / range_size
@@ -260,12 +274,14 @@ class NewspaperScraper:
             - Total articles found: {len(found_articles)}
             - ID range: {min(found_ids)} to {max(found_ids)}
             - Total IDs searched: {len(searched_ids)}
+            - Consecutive failures at exit: {consecutive_failures}
             """)
         else:
             st.write(f"""
             ### Page {page} Summary
             - No articles found
             - IDs searched: {len(searched_ids)}
+            - Consecutive failures at exit: {consecutive_failures}
             """)
 
         return found_articles
