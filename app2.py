@@ -167,8 +167,7 @@ class NewspaperScraper:
 
     def jump_search_for_page(self, page, start_range=348000, end_range=348999):
         """
-        Modified jump search with early exit after consecutive failures.
-        Resets jump size to the default value when starting a new page.
+        Modified jump search that resets jump size for each new page.
         """
         status_text = st.empty()
         progress_bar = st.progress(0)
@@ -177,11 +176,11 @@ class NewspaperScraper:
         range_size = end_range - start_range
         found_articles = []
 
-        # Initial jump size will be range_size / 10
+        # Initial jump size will be range_size / 10 - This will be reset for each new page
         default_jump_size = max(range_size // 10, 1)
-        jump_size = default_jump_size  # Reset jump size to default at the start of the page
+        jump_size = default_jump_size  # Start with default jump size
 
-        status_text.text(f"Starting jump search for page {page} with jump size {jump_size}")
+        status_text.text(f"Starting jump search for page {page} with default jump size {jump_size}")
 
         current_id = start_range
         searched_ids = set()
@@ -258,10 +257,10 @@ class NewspaperScraper:
             if current_id > end_range:
                 if jump_size == 1:
                     break
-                # Reset jump size to default and start from beginning
+                # Reset to default jump size for new search cycle
                 jump_size = default_jump_size
                 current_id = start_range
-                status_text.text(f"Resetting jump size to {jump_size} and starting over")
+                status_text.text(f"Resetting jump size to default ({jump_size}) and starting over")
 
             time.sleep(0.5)  # Prevent too rapid requests
 
