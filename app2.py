@@ -267,8 +267,8 @@ def jump_search_for_page(self, page, start_range=348000, end_range=348999):
             """)
 
         return found_articles
-
-    def create_zip_file(self):
+    
+def create_zip_file(self):
         """Create a zip file of all downloaded content"""
         zip_path = os.path.join(self.temp_dir, f'gujarat_samachar_{self.date_str}.zip')
 
@@ -421,3 +421,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    
