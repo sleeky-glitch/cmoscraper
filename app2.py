@@ -167,28 +167,24 @@ class NewspaperScraper:
 
     def jump_search_for_page(self, page, start_range=348000, end_range=348999):
         """
-        Modified jump search that resets jump size for each new page.
+        Modified jump search with new logic:
+        1. Start from start_range with default jump size of 99
+        2. Search until article found or end_range reached
+        3. If end_range reached without finding article, halve jump size and restart
+        4. When article found, do nearest neighbor search until 10 consecutive misses
+        5. Move to next page after completing search
         """
         status_text = st.empty()
         progress_bar = st.progress(0)
         search_stats = st.empty()
 
-        range_size = end_range - start_range
         found_articles = []
-
-        # Initial jump size will be range_size / 10 - This will be reset for each new page
-        default_jump_size = max(range_size // 10, 1)
-        jump_size = default_jump_size  # Start with default jump size
-
-        status_text.text(f"Starting jump search for page {page} with default jump size {jump_size}")
-
-        current_id = start_range
         searched_ids = set()
-        found_ids = set()
+        jump_size = 99  # Default jump size
+        current_id = start_range
         consecutive_failures = 0
-        has_found_first_article = False
 
-        while jump_size >= 1:
+        def update_stats():
             search_stats.text(f"""
             Current jump size: {jump_size}
             IDs searched: {len(searched_ids)}
@@ -197,72 +193,78 @@ class NewspaperScraper:
             Consecutive failures: {consecutive_failures}
             """)
 
-            # Check if we should exit due to consecutive failures
-            if has_found_first_article and consecutive_failures >= 10:
-                st.warning(f"Exiting page {page} after {consecutive_failures} consecutive failures")
-                break
+            # Update progress based on range covered
+            progress = len(searched_ids) / (end_range - start_range)
+            progress_bar.progress(min(progress, 1.0))
 
-            # Try current ID
-            if current_id not in searched_ids and start_range <= current_id <= end_range:
-                url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{current_id}'
-                status_text.text(f"Trying ID: {current_id} (Jump size: {jump_size})")
+        while jump_size >= 1:
+            status_text.text(f"Searching with jump size: {jump_size}")
+            found_article_in_cycle = False
+            current_id = start_range
 
-                success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, current_id)
-                searched_ids.add(current_id)
+            # Main search loop
+            while current_id <= end_range:
+                if current_id not in searched_ids:
+                    url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{current_id}'
+                    status_text.text(f"Trying ID: {current_id}")
 
-                if success:
-                    has_found_first_article = True
-                    consecutive_failures = 0  # Reset counter on success
-                    found_articles.append({
-                        'article_id': current_id,
-                        'url': url,
-                        'filepath': result
-                    })
-                    found_ids.add(current_id)
+                    success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, current_id)
+                    searched_ids.add(current_id)
+                    update_stats()
 
-                    # Search 10 IDs before and after the found ID
-                    search_range = 10
-                    for nearby_id in range(current_id - search_range, current_id + search_range + 1):
-                        if nearby_id not in searched_ids and start_range <= nearby_id <= end_range:
-                            url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{nearby_id}'
-                            status_text.text(f"Searching near found article: {nearby_id}")
+                    if success:
+                        found_article_in_cycle = True
+                        found_articles.append({
+                            'article_id': current_id,
+                            'url': url,
+                            'filepath': result
+                        })
 
-                            success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, nearby_id)
-                            searched_ids.add(nearby_id)
+                        # Nearest neighbor search
+                        consecutive_failures = 0
+                        current_pos = current_id
+                        offset = 1
 
-                            if success:
-                                consecutive_failures = 0  # Reset counter on success
-                                found_articles.append({
-                                    'article_id': nearby_id,
-                                    'url': url,
-                                    'filepath': result
-                                })
-                                found_ids.add(nearby_id)
-                            else:
-                                consecutive_failures += 1
+                        while consecutive_failures < 10:
+                            # Try one up and one down
+                            for neighbor_id in [current_pos + offset, current_pos - offset]:
+                                if start_range <= neighbor_id <= end_range and neighbor_id not in searched_ids:
+                                    url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{neighbor_id}'
+                                    status_text.text(f"Checking neighbor: {neighbor_id}")
 
-                    # Reduce jump size after finding an article
-                    jump_size = max(jump_size // 2, 1)
+                                    success, result = self.download_image(url, os.path.join(self.base_folder, self.date_str), page, neighbor_id)
+                                    searched_ids.add(neighbor_id)
+                                    update_stats()
+
+                                    if success:
+                                        consecutive_failures = 0
+                                        found_articles.append({
+                                            'article_id': neighbor_id,
+                                            'url': url,
+                                            'filepath': result
+                                        })
+                                    else:
+                                        consecutive_failures += 1
+
+                            offset += 1
+                            time.sleep(0.5)  # Prevent too rapid requests
+
+                        # After nearest neighbor search, continue with jump search
+                        current_id += jump_size
+                    else:
+                        current_id += jump_size
+
                 else:
-                    consecutive_failures += 1
+                    current_id += jump_size
 
-                # Update progress
-                progress = len(searched_ids) / range_size
-                progress_bar.progress(min(progress, 1.0))
+                time.sleep(0.5)  # Prevent too rapid requests
 
-            # Move to next position
-            current_id += jump_size
-
-            # If we've reached the end of the range
-            if current_id > end_range:
-                if jump_size == 1:
-                    break
-                # Reset to default jump size for new search cycle
-                jump_size = default_jump_size
-                current_id = start_range
-                status_text.text(f"Resetting jump size to default ({jump_size}) and starting over")
-
-            time.sleep(0.5)  # Prevent too rapid requests
+            # If no article found in this cycle and we reached end_range
+            if not found_article_in_cycle:
+                jump_size = jump_size // 2  # Halve the jump size
+                status_text.text(f"No articles found. Reducing jump size to {jump_size}")
+            else:
+                break  # Exit if we found and processed articles
 
         # Sort found articles by ID
         found_articles.sort(key=lambda x: x['article_id'])
@@ -272,16 +274,14 @@ class NewspaperScraper:
             st.write(f"""
             ### Page {page} Summary
             - Total articles found: {len(found_articles)}
-            - ID range: {min(found_ids)} to {max(found_ids)}
+            - ID range: {min(a['article_id'] for a in found_articles)} to {max(a['article_id'] for a in found_articles)}
             - Total IDs searched: {len(searched_ids)}
-            - Consecutive failures at exit: {consecutive_failures}
             """)
         else:
             st.write(f"""
             ### Page {page} Summary
             - No articles found
             - IDs searched: {len(searched_ids)}
-            - Consecutive failures at exit: {consecutive_failures}
             """)
 
         return found_articles
