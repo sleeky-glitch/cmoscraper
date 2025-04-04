@@ -15,6 +15,7 @@ import tempfile
 import shutil
 import base64
 
+
 class NewspaperScraper:
     def __init__(self, date_str, temp_dir):
         self.date_str = date_str
@@ -163,7 +164,8 @@ class NewspaperScraper:
         except Exception as e:
             self.consecutive_failures += 1
             return False, str(e)
-def jump_search_for_page(self, page, start_range=348000, end_range=348999):
+
+    def jump_search_for_page(self, page, start_range=348000, end_range=348999):
         """
         Perform a jump search to find valid articles, starting with large gaps and narrowing down.
         Once an article is found, search nearby IDs.
@@ -267,8 +269,8 @@ def jump_search_for_page(self, page, start_range=348000, end_range=348999):
             """)
 
         return found_articles
-    
-def create_zip_file(self):
+
+    def create_zip_file(self):
         """Create a zip file of all downloaded content"""
         zip_path = os.path.join(self.temp_dir, f'gujarat_samachar_{self.date_str}.zip')
 
@@ -422,4 +424,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-    
