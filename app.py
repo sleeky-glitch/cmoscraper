@@ -165,34 +165,86 @@ class NewspaperScraper:
             return False, str(e)
 
     def search_around_id(self, page, start_id, search_range=50):
-        """Search for articles around the given ID"""
+        """
+        Search for articles around the given ID.
+        When a successful article is found, extend search by 10 IDs in both directions.
+        """
         folder_path = os.path.join(self.base_folder, self.date_str)
         successful_downloads = []
-
-        # Search both directions from the start_id
-        search_ids = list(range(start_id - search_range, start_id + search_range + 1))
+        found_ids = set()  # Keep track of found article IDs
+        ids_to_search = set(range(start_id - search_range, start_id + search_range + 1))
 
         progress_bar = st.progress(0)
         status_text = st.empty()
+        search_stats = st.empty()
 
-        for idx, article_id in enumerate(search_ids):
-            if self.consecutive_failures >= self.max_consecutive_failures:
-                status_text.text(f"Stopping search after {self.max_consecutive_failures} consecutive failures")
-                break
+        while ids_to_search and self.consecutive_failures < self.max_consecutive_failures:
+            current_id = min(ids_to_search)  # Start from lowest ID
+            ids_to_search.remove(current_id)
 
-            url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{article_id}'
+            if current_id in found_ids:
+                continue
+
+            url = f'https://epaper.gujaratsamachar.com/view_article/ahmedabad/{self.date_str}/{page}/{current_id}'
             status_text.text(f"Trying URL: {url}")
 
-            success, result = self.download_image(url, folder_path, page, article_id)
+            success, result = self.download_image(url, folder_path, page, current_id)
+
             if success:
                 successful_downloads.append({
-                    'article_id': article_id,
+                    'article_id': current_id,
                     'url': url,
                     'filepath': result
                 })
+                found_ids.add(current_id)
 
-            progress_bar.progress((idx + 1) / len(search_ids))
-            time.sleep(0.5)
+                # Add 10 more IDs to search in both directions
+                new_ids_lower = set(range(current_id - 10, current_id))
+                new_ids_upper = set(range(current_id + 1, current_id + 11))
+                new_ids = new_ids_lower.union(new_ids_upper)
+
+                # Add new IDs to search set if they haven't been found yet
+                ids_to_search.update(id for id in new_ids if id not in found_ids)
+
+                # Reset consecutive failures counter
+                self.consecutive_failures = 0
+
+                # Update search statistics
+                search_stats.text(f"""
+                Found articles: {len(successful_downloads)}
+                Remaining IDs to search: {len(ids_to_search)}
+                Last successful ID: {current_id}
+                """)
+
+            # Update progress based on total searched vs total to search
+            total_searched = len(found_ids) + len(ids_to_search)
+            progress = len(found_ids) / total_searched if total_searched > 0 else 0
+            progress_bar.progress(progress)
+
+            time.sleep(0.5)  # Prevent too rapid requests
+
+        if self.consecutive_failures >= self.max_consecutive_failures:
+            status_text.text(f"Stopping search after {self.max_consecutive_failures} consecutive failures")
+        else:
+            status_text.text("Completed search for this page")
+
+        # Sort downloads by article ID for better organization
+        successful_downloads.sort(key=lambda x: x['article_id'])
+
+        # Display final statistics for this page
+        if found_ids:
+            st.write(f"""
+            ### Page {page} Summary
+            - Total articles found: {len(successful_downloads)}
+            - ID range: {min(found_ids)} to {max(found_ids)}
+            - Search expanded {len(ids_to_search) - (2 * search_range)} additional IDs
+            """)
+        else:
+            st.write(f"""
+            ### Page {page} Summary
+            - No articles found
+            - Search range: {start_id - search_range} to {start_id + search_range}
+            """)
 
         return successful_downloads
 
@@ -295,16 +347,27 @@ def main():
                 st.write("### Scraping Progress")
 
                 overall_progress = st.progress(0)
-                status_text = st.empty()
+                overall_status = st.empty()
+                total_downloads = 0
+                total_articles_found = 0
 
                 for page_idx, page in enumerate(range(1, num_pages + 1)):
+                    st.write(f"#### Processing Page {page}")
+
                     if page_links[page]:
                         start_id = extract_article_id(page_links[page])
                         if start_id:
-                            status_text.text(f"Processing page {page}")
+                            overall_status.text(f"Processing page {page} of {num_pages}")
                             downloads = scraper.search_around_id(page, start_id, search_range)
                             all_downloads.extend(downloads)
-                            st.write(f"Downloaded {len(downloads)} articles from page {page}")
+
+                            total_articles_found += len(downloads)
+
+                            st.write(f"""
+                            Page {page} Complete:
+                            - Articles found: {len(downloads)}
+                            - Success rate: {(len(downloads)/search_range*100):.1f}%
+                            """)
                         else:
                             st.error(f"Invalid URL format for page {page}")
                     else:
@@ -312,7 +375,11 @@ def main():
 
                     overall_progress.progress((page_idx + 1) / num_pages)
 
-                status_text.text("Scraping completed!")
+                    # Update overall statistics
+                    st.sidebar.metric("Total Articles Found", total_articles_found)
+                    st.sidebar.metric("Pages Completed", page_idx + 1)
+
+                overall_status.text("Scraping completed!")
 
             with results_container:
                 st.write("### Scraping Results")
